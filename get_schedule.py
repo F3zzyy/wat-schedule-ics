@@ -4,7 +4,6 @@ collections.Mapping = collections.abc.Mapping
 
 import requests
 from bs4 import BeautifulSoup
-from ics import Calendar, Event
 from datetime import datetime, timedelta
 import urllib3
 import re
@@ -23,16 +22,19 @@ TIME_MAP = {
 
 MONTH_MAP = {"II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7}
 
-# ---- CONFIG ----
 semester = "lato"
 group = "WEL24EL2S0"
 filename = f"{group}_{semester}.ics"
-# ----------------
 
 
 def format_cell_text(cell):
     lines = [line.strip() for line in cell.get_text("\n").split("\n") if line.strip()]
-    return "\n".join(lines)
+    return "\\n".join(lines)
+
+
+def format_ics_datetime(dt: datetime) -> str:
+    # Lokalny czas bez Z, format RFC5545
+    return dt.strftime("%Y%m%dT%H%M%S")
 
 
 def parse_wat_schedule():
@@ -42,7 +44,7 @@ def parse_wat_schedule():
     soup = BeautifulSoup(response.content, "html.parser")
     table = soup.find("table")
 
-    c = Calendar()
+    events = []
     current_dates = []
 
     for row in table.find_all("tr"):
@@ -51,8 +53,8 @@ def parse_wat_schedule():
             continue
 
         first_cell_text = cells[0].get_text(strip=True).lower()
-        
-        # Date header row
+
+        # Wiersz z datami
         if any(
             day_name in first_cell_text
             for day_name in ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."]
@@ -68,45 +70,55 @@ def parse_wat_schedule():
                     current_dates.append(shifted_date)
             continue
 
-        # Lecture rows
+        # Wiersz z zajęciami
         if first_cell_text in TIME_MAP:
             start_t, end_t = TIME_MAP[first_cell_text]
             for i, cell in enumerate(cells[2:]):
                 cell_content = format_cell_text(cell)
                 if cell_content and i < len(current_dates):
-                    e = Event()
-                    e.name = cell_content
-                    
-                    # Parse times and convert to UTC manually
-                    # Polish time = UTC+1 (winter) or UTC+2 (summer DST)
-                    begin_naive = datetime.strptime(
-                        current_dates[i].strftime(f"%Y-%m-%d {start_t}:00"),
-                        "%Y-%m-%d %H:%M:%S"
+                    date = current_dates[i]
+
+                    start_dt = datetime.strptime(
+                        date.strftime(f"%Y-%m-%d {start_t}:00"),
+                        "%Y-%m-%d %H:%M:%S",
                     )
-                    end_naive = datetime.strptime(
-                        current_dates[i].strftime(f"%Y-%m-%d {end_t}:00"),
-                        "%Y-%m-%d %H:%M:%S"
+                    end_dt = datetime.strptime(
+                        date.strftime(f"%Y-%m-%d {end_t}:00"),
+                        "%Y-%m-%d %H:%M:%S",
                     )
-                    
-                    # Determine UTC offset (CET = UTC+1, CEST = UTC+2)
-                    # DST in Poland: last Sunday of March to last Sunday of October
-                    # For simplicity, check month
-                    if 3 <= begin_naive.month <= 10:  # approximate DST period
-                        utc_offset = timedelta(hours=2)  # CEST
-                    else:
-                        utc_offset = timedelta(hours=1)  # CET
-                    
-                    # Convert to UTC
-                    e.begin = begin_naive - utc_offset
-                    e.end = end_naive - utc_offset
-                    
-                    c.events.add(e)
+
+                    uid = f"{date.strftime('%Y%m%d')}-{first_cell_text}-{i}@wat-schedule"
+
+                    events.append(
+                        {
+                            "uid": uid,
+                            "summary": cell_content,
+                            "dtstart": format_ics_datetime(start_dt),
+                            "dtend": format_ics_datetime(end_dt),
+                        }
+                    )
+
+    # Ręczne złożenie pliku ICS – lokalny czas, bez Z, bez TZID
+    lines = []
+    lines.append("BEGIN:VCALENDAR")
+    lines.append("VERSION:2.0")
+    lines.append("PRODID:-//F3zzyy//WAT Schedule//PL")
+
+    for ev in events:
+        lines.append("BEGIN:VEVENT")
+        lines.append(f"UID:{ev['uid']}")
+        lines.append(f"SUMMARY:{ev['summary']}")
+        lines.append(f"DTSTART:{ev['dtstart']}")
+        lines.append(f"DTEND:{ev['dtend']}")
+        lines.append("END:VEVENT")
+
+    lines.append("END:VCALENDAR")
 
     with open(filename, "w", encoding="utf-8") as f:
-        f.writelines(c.serialize_iter())
+        f.write("\r\n".join(lines))
 
-    print(f"✨ Generated {len(c.events)} events into {filename}.")
-    print("📅 Dates shifted by 1 week. First lectures now start on 02.03.")
+    print(f"✨ Generated {len(events)} events into {filename}.")
+    print("✅ Times are written as LOCAL (no Z, no TZID).")
 
 
 if __name__ == "__main__":

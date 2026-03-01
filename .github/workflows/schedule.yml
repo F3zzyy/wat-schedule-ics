@@ -1,0 +1,32 @@
+name: Build WAT calendar
+
+on:
+  schedule:
+    - cron: "0 4 * * *"    # codziennie o 04:00 UTC (05:00 CET zimą, 06:00 latem)
+  workflow_dispatch:        # przycisk "Run workflow" w GitHubie
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir requests beautifulsoup4 ics urllib3 "tatsu<5"
+
+      - name: Generate ICS
+        run: |
+          python get_schedule.py
+
+      - name: Commit and push if changed
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update WAT schedule"
+          file_pattern: "WEL24EL2S0_lato.ics"

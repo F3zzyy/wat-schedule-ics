@@ -6,7 +6,6 @@ import requests
 from bs4 import BeautifulSoup
 from ics import Calendar, Event
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 import urllib3
 import re
 
@@ -24,18 +23,14 @@ TIME_MAP = {
 
 MONTH_MAP = {"II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7}
 
-# ---- CONFIG (you change this only when semester changes) ----
+# ---- CONFIG ----
 semester = "lato"
 group = "WEL24EL2S0"
 filename = f"{group}_{semester}.ics"
-# -------------------------------------------------------------
+# ----------------
 
 
 def format_cell_text(cell):
-    """
-    Preserves original line breaks and exact spacing.
-    Ensures labels, rooms, and names stay on separate lines.
-    """
     lines = [line.strip() for line in cell.get_text("\n").split("\n") if line.strip()]
     return "\n".join(lines)
 
@@ -55,8 +50,9 @@ def parse_wat_schedule():
         if not cells:
             continue
 
-        # 1. Date Header Row: Extract dates and shift them +7 days
         first_cell_text = cells[0].get_text(strip=True).lower()
+        
+        # Date header row
         if any(
             day_name in first_cell_text
             for day_name in ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."]
@@ -72,7 +68,7 @@ def parse_wat_schedule():
                     current_dates.append(shifted_date)
             continue
 
-        # 2. Lecture Row: Apply multi-line formatting with correct timezone
+        # Lecture rows
         if first_cell_text in TIME_MAP:
             start_t, end_t = TIME_MAP[first_cell_text]
             for i, cell in enumerate(cells[2:]):
@@ -81,19 +77,29 @@ def parse_wat_schedule():
                     e = Event()
                     e.name = cell_content
                     
-                    # Create timezone-aware datetime objects for Europe/Warsaw
-                    begin_dt = datetime.strptime(
+                    # Parse times and convert to UTC manually
+                    # Polish time = UTC+1 (winter) or UTC+2 (summer DST)
+                    begin_naive = datetime.strptime(
                         current_dates[i].strftime(f"%Y-%m-%d {start_t}:00"),
                         "%Y-%m-%d %H:%M:%S"
-                    ).replace(tzinfo=ZoneInfo("Europe/Warsaw"))
-                    
-                    end_dt = datetime.strptime(
+                    )
+                    end_naive = datetime.strptime(
                         current_dates[i].strftime(f"%Y-%m-%d {end_t}:00"),
                         "%Y-%m-%d %H:%M:%S"
-                    ).replace(tzinfo=ZoneInfo("Europe/Warsaw"))
+                    )
                     
-                    e.begin = begin_dt
-                    e.end = end_dt
+                    # Determine UTC offset (CET = UTC+1, CEST = UTC+2)
+                    # DST in Poland: last Sunday of March to last Sunday of October
+                    # For simplicity, check month
+                    if 3 <= begin_naive.month <= 10:  # approximate DST period
+                        utc_offset = timedelta(hours=2)  # CEST
+                    else:
+                        utc_offset = timedelta(hours=1)  # CET
+                    
+                    # Convert to UTC
+                    e.begin = begin_naive - utc_offset
+                    e.end = end_naive - utc_offset
+                    
                     c.events.add(e)
 
     with open(filename, "w", encoding="utf-8") as f:

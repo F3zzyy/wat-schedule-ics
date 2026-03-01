@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from ics import Calendar, Event
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import urllib3
 import re
 
@@ -24,7 +25,7 @@ TIME_MAP = {
 MONTH_MAP = {"II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7}
 
 # ---- CONFIG (you change this only when semester changes) ----
-semester = "lato"          # later you will switch this to "zima"
+semester = "lato"
 group = "WEL24EL2S0"
 filename = f"{group}_{semester}.ics"
 # -------------------------------------------------------------
@@ -71,7 +72,7 @@ def parse_wat_schedule():
                     current_dates.append(shifted_date)
             continue
 
-        # 2. Lecture Row: Apply multi-line formatting
+        # 2. Lecture Row: Apply multi-line formatting with correct timezone
         if first_cell_text in TIME_MAP:
             start_t, end_t = TIME_MAP[first_cell_text]
             for i, cell in enumerate(cells[2:]):
@@ -79,8 +80,20 @@ def parse_wat_schedule():
                 if cell_content and i < len(current_dates):
                     e = Event()
                     e.name = cell_content
-                    e.begin = current_dates[i].strftime(f"%Y-%m-%d {start_t}:00")
-                    e.end = current_dates[i].strftime(f"%Y-%m-%d {end_t}:00")
+                    
+                    # Create timezone-aware datetime objects for Europe/Warsaw
+                    begin_dt = datetime.strptime(
+                        current_dates[i].strftime(f"%Y-%m-%d {start_t}:00"),
+                        "%Y-%m-%d %H:%M:%S"
+                    ).replace(tzinfo=ZoneInfo("Europe/Warsaw"))
+                    
+                    end_dt = datetime.strptime(
+                        current_dates[i].strftime(f"%Y-%m-%d {end_t}:00"),
+                        "%Y-%m-%d %H:%M:%S"
+                    ).replace(tzinfo=ZoneInfo("Europe/Warsaw"))
+                    
+                    e.begin = begin_dt
+                    e.end = end_dt
                     c.events.add(e)
 
     with open(filename, "w", encoding="utf-8") as f:
@@ -92,4 +105,3 @@ def parse_wat_schedule():
 
 if __name__ == "__main__":
     parse_wat_schedule()
-

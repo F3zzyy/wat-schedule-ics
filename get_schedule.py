@@ -75,6 +75,12 @@ def parse_wat_schedule():
             start_t, end_t = TIME_MAP[first_cell_text]
             for i, cell in enumerate(cells[2:]):
                 cell_content = format_cell_text(cell)
+
+                # Pomiń zajęcia, które mają w nazwie XWF, XFiz1, SSW
+                EXCLUDE_TAGS = ["XWF", "XFiz1", "SSW"]
+                if any(tag in cell_content for tag in EXCLUDE_TAGS):
+                    continue
+
                 if cell_content and i < len(current_dates):
                     date = current_dates[i]
 
@@ -97,6 +103,7 @@ def parse_wat_schedule():
                             "dtend": format_ics_datetime(end_dt),
                         }
                     )
+
 
     # Ręczne złożenie pliku ICS – lokalny czas, bez Z, bez TZID
     lines = []
